@@ -1,0 +1,53 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build Texture2DDecoderNative (arm64-v8a, NDK)
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          echo "NDK: $NDK"
+          cmake -S Texture2DDecoderNative -B build-t2d \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_FLAGS="-Wno-c++11-narrowing -w" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
+          cmake --build build-t2d -j4
+          mkdir -p app/Libraries/arm64-v8a
+          cp build-t2d/libTexture2DDecoderNative.so app/Libraries/arm64-v8a/
+          ls -la app/Libraries/arm64-v8a
+
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Build APK
+        run: dotnet build app/AssetStudioModAndroid.csproj -c Release -p:AndroidPackageFormat=apk
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          find app/bin -name "*.apk" -exec cp {} out/ \;
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AssetStudioMod-Android-apk
+          path: out/*.apk
